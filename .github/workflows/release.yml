@@ -9,62 +9,50 @@ permissions:
   contents: write
 
 jobs:
-  build-upload:
-    name: Build and upload
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        include:
-          - build: linux
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-
-          - build: windows-gnu
-            os: windows-latest
-            target: x86_64-pc-windows-gnu
+  build:
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Install Linux and Windows cross compilers
+        run: sudo apt-get install --yes --no-install-recommends musl-tools gcc-mingw-w64-x86-64-win32
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Rustup targets
+        run: rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
+
+      - uses: actions/checkout@v4
         with:
-          targets: ${{ matrix.target }}
+          fetch-depth: 0
+
+      - name: Build
+        run: cargo build --verbose --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
 
       - name: Get the release version from the tag
         shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --verbose --release --target ${{ matrix.target }}
 
       - name: Build archive
         shell: bash
         run: |
           binary_name="tuisto"
 
-          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
-          mkdir "$dirname"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
-          else
-            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
-          fi
+          wintarget="x86_64-pc-windows-gnu"
+          linuxtarget="x86_64-unknown-linux-musl"
 
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a "$dirname.zip" "$dirname"
-            echo "ASSET=$dirname.zip" >> $GITHUB_ENV
-          else
-            tar -czf "$dirname.tar.gz" "$dirname"
-            echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
-          fi
+          windir="$binary_name-${{ env.VERSION }}-$wintarget"
+          linuxdir="$binary_name-${{ env.VERSION }}-$linuxtarget"
+
+          mv "target/$wintarget/release/$binary_name.exe" "$windir"
+          mv "target/$linuxtarget/release/$binary_name" "$linuxdir"
+
+          7z a "$windir.zip" "$windir"
+          echo "WINASSET=$windir.zip" >> $GITHUB_ENV
+
+          tar -czf "$linuxdir.tar.gz" "$linuxdir"
+          echo "LINUXASSET=$linuxdir.tar.gz" >> $GITHUB_ENV
 
       - name: Upload the binaries
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ${{ env.ASSET }}
+            ${{ env.WINASSET }}
+            ${{ env.LINUXASSET }}
